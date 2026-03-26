@@ -12,81 +12,46 @@ set -euo pipefail
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ---------------------------------------------------------------------------
-# show_menu
-#   Displays the main menu and returns the user's choice.
-# ---------------------------------------------------------------------------
 show_menu() {
     zenity --list \
         --title="Hybrid Compression System" \
         --text="Select an operation" \
         --column="Operation" \
-        --width=500 --height=250 \
+        --width=500 --height=280 \
         --modal \
         "Compress File" \
         "Exit" 2>/dev/null
 }
 
-# ---------------------------------------------------------------------------
-# select_input_file
-#   Opens a file chooser and returns the selected file path.
-# ---------------------------------------------------------------------------
-select_input_file() {
-    zenity --file-selection \
-        --title="Select File to Compress" \
-        --width=700 --height=500 2>/dev/null
-}
+handle_compress() {
+    local input_file output_file dir_name base_name name_only extension
 
-# ---------------------------------------------------------------------------
-# select_output_file <default_path>
-#   Opens a save dialog with a suggested filename and returns the chosen path.
-# ---------------------------------------------------------------------------
-select_output_file() {
-    local default_path="$1"
-
-    zenity --file-selection \
-        --save \
-        --title="Save Compressed File As" \
-        --filename="$default_path" \
-        --width=700 --height=500 2>/dev/null
-}
-
-# ---------------------------------------------------------------------------
-# build_output_path <input_file>
-#   Derives the default output .zip path from the input filename.
-# ---------------------------------------------------------------------------
-build_output_path() {
-    local input_file="$1"
-    local dir_name base_name name_only
+    input_file=$(zenity --file-selection --title="Select File to Compress" --width=700 --height=500 2>/dev/null)
+    [[ -z "$input_file" ]] && return 0
 
     dir_name="$(dirname "$input_file")"
     base_name="$(basename "$input_file")"
     name_only="${base_name%.*}"
+    extension="${base_name##*.}"
 
-    echo "${dir_name}/${name_only}.zip"
-}
+    local out_ext
+    [[ "${extension,,}" == "pdf" ]] && out_ext="pdf" || out_ext="gz"
 
-# ---------------------------------------------------------------------------
-# handle_compress
-#   Orchestrates file selection and delegates to compress.sh.
-# ---------------------------------------------------------------------------
-handle_compress() {
-    local input_file output_file default_output
-
-    input_file="$(select_input_file)"
-    [[ -z "$input_file" ]] && return 0
-
-    default_output="$(build_output_path "$input_file")"
-
-    output_file="$(select_output_file "$default_output")"
+    output_file=$(zenity --file-selection --save \
+        --title="Save Compressed File As" \
+        --filename="${dir_name}/${name_only}_compressed.${out_ext}" \
+        --width=700 --height=500 2>/dev/null)
     [[ -z "$output_file" ]] && return 0
 
-    bash "${SCRIPT_DIR}/compress.sh" "$input_file" "$output_file"
+    local input_ext
+    input_ext="${input_file##*.}"
+    if [[ "${input_ext,,}" == "pdf" ]]; then
+        bash "${SCRIPT_DIR}/compression/compress_pdf.sh" "$input_file" "$output_file"
+    else
+        bash "${SCRIPT_DIR}/compression/compress.sh" "$input_file" "$output_file"
+    fi
 }
 
-# ---------------------------------------------------------------------------
-# main
-# ---------------------------------------------------------------------------
 main() {
     while true; do
         local choice
@@ -94,7 +59,7 @@ main() {
 
         case "$choice" in
             "Compress File") handle_compress ;;
-            "Exit" | "")     exit 0 ;;
+            "Exit" | "")      exit 0           ;;
         esac
     done
 }
