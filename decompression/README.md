@@ -9,10 +9,8 @@ This directory contains all the scripts needed to decompress files that were com
 The decompression system intelligently detects the compression method and file type, then applies the appropriate decompression algorithm to restore the original data.
 
 ### Supported Compression Methods
-- **GZIP (RLE+LZW+GZIP Pipeline)**: For text and highly compressible files
-- **LZW (Lempel-Ziv-Welch)**: Standalone LZW decompression
-- **RLE (Run-Length Encoding)**: Standalone RLE decompression
-- **PDF**: PDF decompression using Ghostscript
+- **Auto-Detected GZIP (.gz)**: Automatically detects and reverses RLE+LZW+GZIP pipeline
+- **Auto-Detected PDF (.pdf.gz)**: Automatically detects and decompresses GZIP-compressed PDFs
 
 ---
 
@@ -21,17 +19,24 @@ The decompression system intelligently detects the compression method and file t
 ```
 decompression/
 ├── README.md                       # This file - Documentation
-├── decompress.sh                   # Main entry point (orchestrator)
+├── decompress.sh                   # Main entry point (auto-detects method)
 ├── smart_gzip_decompress.sh       # Smart GZIP decompression with auto-detection
-├── gzip_decompress.sh             # Full pipeline GZIP decompression
 ├── lzw_decode.sh                  # LZW decoder
-├── rle_decode.sh                  # RLE decoder
-└── decompress_pdf.sh              # PDF decompression
+└── rle_decode.sh                  # RLE decoder
 ```
 
 ---
 
 ## Decompression Pipeline Logic
+
+### Automatic Method Detection
+
+The decompression system **auto-detects** compression method based on file extension:
+
+- **Files ending with `.pdf.gz`** → PDF decompression via GZIP
+- **Files ending with `.gz`** → Intelligent GZIP decompression
+  - Automatically detects if RLE+LZW pipeline was applied
+  - Decompresses accordingly (with or without RLE/LZW reversal)
 
 ### For GZIP Compressed Files (.gz)
 
@@ -42,49 +47,46 @@ Compressed File (GZIP)
     ↓
 gunzip (decompress GZIP layer)
     ↓
-LZW Decode (reverse LZW encoding)
+[Auto-detect: Check if LZW encoded]
     ↓
-RLE Decode (reverse RLE encoding)
+[If LZW detected] LZW Decode + RLE Decode
+[If plain GZIP] → use as-is
     ↓
 Original File
 ```
-
-### For Other Compressed Files
-
-- **RLE Only**: RLE Decode → Original File
-- **LZW Only**: LZW Decode → Original File
-- **PDF**: Ghostscript reconversion → Original PDF
 
 ---
 
 ## Script Details
 
-### 1. **decompress.sh** (Main Orchestrator)
+### 1. **decompress.sh** (Main Orchestrator with Auto-Detection)
 
-**Purpose**: Single entry point for all decompression operations
+**Purpose**: Single entry point for all decompression operations with automatic method detection
 
 **Usage**:
 ```bash
-./decompress.sh <input_file> <output_file> <method>
+./decompress.sh <input_file> <output_file>
 ```
 
 **Parameters**:
-- `<input_file>`: Path to the compressed file
+- `<input_file>`: Path to the compressed file (any .gz or .pdf.gz file)
 - `<output_file>`: Path where the decompressed file will be saved
-- `<method>`: Decompression method (gzip, lzw, rle, pdf)
 
 **Example**:
 ```bash
-./decompress.sh myfile_compressed.gz myfile_restored.txt gzip
-./decompress.sh myfile_compressed.lzw myfile.txt lzw
-./decompress.sh myfile_compressed.rle myfile.txt rle
-./decompress.sh myfile_compressed.pdf myfile_restored.pdf pdf
+# Decompress a text file (auto-detects as GZIP)
+./decompress.sh myfile_compressed.gz myfile_restored.txt
+
+# Decompress a PDF (auto-detected as PDF GZIP)
+./decompress.sh document_compressed.pdf.gz document_restored.pdf
 ```
 
 **How It Works**:
-- Acts as a router that dispatches to the appropriate decompression script
-- Validates the number of arguments
-- Routes to the correct decoder based on the `<method>` parameter
+- **Auto-detects** the compression method based on file extension
+- **`.pdf.gz` files** → Routes to smart GZIP decompression (for PDFs)
+- **`.gz` files** → Routes to smart GZIP decompression (with LZW/RLE detection)
+- **Other extensions** → Returns error (unsupported format)
+- Validates input file exists before proceeding
 
 ---
 
@@ -127,38 +129,7 @@ Original File
 
 ---
 
-### 3. **gzip_decompress.sh** (Full Pipeline GZIP Decompression)
-
-**Purpose**: Explicitly decompresses files that used the full RLE+LZW+GZIP pipeline
-
-**Usage**:
-```bash
-./gzip_decompress.sh <input_file> <output_file>
-```
-
-**Parameters**:
-- `<input_file>`: GZIP compressed file
-- `<output_file>`: Destination for decompressed file
-
-**How It Works**:
-1. Decompresses GZIP layer: `gunzip -c input > temp1`
-2. Decodes LZW layer: `lzw_decode.sh temp1 > temp2`
-3. Decodes RLE layer: `rle_decode.sh temp2 > output`
-4. Cleans up temporary files
-
-**Example**:
-```bash
-./gzip_decompress.sh article_compressed.gz article.txt
-```
-
-**When to Use**:
-- When you know the file was compressed with the full RLE+LZW+GZIP pipeline
-- For guaranteed correct decompression of text files
-- Note: `smart_gzip_decompress.sh` is preferred as it auto-detects
-
----
-
-### 4. **lzw_decode.sh** (LZW Decoder)
+### 3. **lzw_decode.sh** (LZW Decoder)
 
 **Purpose**: Reverses LZW (Lempel-Ziv-Welch) encoding
 
@@ -190,7 +161,7 @@ Original File
 
 ---
 
-### 5. **rle_decode.sh** (RLE Decoder)
+### 4. **rle_decode.sh** (RLE Decoder)
 
 **Purpose**: Reverses Run-Length Encoding
 
@@ -236,54 +207,37 @@ while (i <= n && substr(line, i, 1) ~ /[0-9]/) {
 
 ---
 
-### 6. **decompress_pdf.sh** (PDF Decompression)
-
-**Purpose**: Decompresses PDF files using Ghostscript with high quality settings
-
-**Usage**:
-```bash
-./decompress_pdf.sh <input_file> <output_file>
-```
-
-**Parameters**:
-- `<input_file>`: Compressed PDF file
-- `<output_file>`: Destination for decompressed PDF
-
-**How It Works**:
-- Uses Ghostscript (`gs`) to reprocess the PDF
-- Applies printer quality settings (300 DPI) to restore quality
-- Flattens and reoptimizes the PDF structure
-
-**Example**:
-```bash
-./decompress_pdf.sh report_compressed.pdf report_restored.pdf
-```
-
-**Requirements**:
-- Ghostscript must be installed: `sudo apt install ghostscript`
-
----
-
 ## Complete Workflow Example
 
-### Scenario: Compressing and Decompressing a Text Document
+### Scenario: Decompressing a File
 
-**Step 1: Compress (in compression folder)**
+**Step 1: Decompress (no method selection needed)**
 ```bash
-bash compression/compress.sh myjournal.txt myjournal_compressed.gz
-# Output: RLE → LZW → GZIP pipeline
-# Result: myjournal_compressed.gz
+bash decompression/decompress.sh myjournal_compressed.gz myjournal_restored.txt
+# Auto-detects: .gz file → uses smart GZIP decompression
+# Smart GZIP automatically detects if RLE+LZW was applied
+# Result: myjournal_restored.txt
 ```
 
-**Step 2: Decompress (in decompression folder)**
-```bash
-bash decompression/decompress.sh myjournal_compressed.gz myjournal_restored.txt gzip
-```
-
-**Step 3: Verify**
+**Step 2: Verify**
 ```bash
 diff myjournal.txt myjournal_restored.txt
 # No output = files are identical ✓
+```
+
+### Scenario: Decompressing a PDF
+
+**Step 1: Decompress (no method selection needed)**
+```bash
+bash decompression/decompress.sh mydocument_compressed.pdf.gz mydocument_restored.pdf
+# Auto-detects: .pdf.gz file → uses smart GZIP decompression
+# Result: mydocument_restored.pdf
+```
+
+**Step 2: Verify**
+```bash
+file mydocument_restored.pdf
+# Should output: PDF document...
 ```
 
 ---
