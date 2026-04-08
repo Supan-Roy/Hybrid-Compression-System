@@ -20,7 +20,8 @@ show_menu() {
         --width=500 --height=320 \
         --modal \
         "Compress File" \
-        "Decompress File" \
+        "Compress Folder" \
+        "Decompress File/Archive" \
         "Exit" 2>/dev/null
 }
 handle_decompress() {
@@ -39,6 +40,10 @@ handle_decompress() {
         # PDF compressed file
         name_only="${base_name%.pdf.gz}"
         out_ext="pdf"
+    elif [[ "$base_name" == *.tar.gz ]]; then
+        # Archive compressed file
+        name_only="${base_name%.tar.gz}"
+        out_ext="tar"
     else
         # Regular compressed file
         out_ext="txt"
@@ -51,6 +56,12 @@ handle_decompress() {
     [[ -z "$output_file" ]] && return 0
 
     bash "${SCRIPT_DIR}/decompression/decompress.sh" "$input_file" "$output_file"
+
+    if [[ "$out_ext" == "tar" ]]; then
+        tar -xf "$output_file" -C "$(dirname "$output_file")"
+        zenity --info --title="Extraction Complete" --text="Archive extracted to $(dirname "$output_file")" --width=400 2>/dev/null
+        rm -f "$output_file"
+    fi
 }
 
 handle_compress() {
@@ -82,6 +93,28 @@ handle_compress() {
     fi
 }
 
+handle_compress_folder() {
+    local input_dir output_file base_name
+
+    input_dir=$(zenity --file-selection --directory --title="Select Folder to Compress" --width=700 --height=500 2>/dev/null)
+    [[ -z "$input_dir" ]] && return 0
+
+    base_name="$(basename "$input_dir")"
+
+    output_file=$(zenity --file-selection --save \
+        --title="Save Compressed Folder As" \
+        --filename="$(dirname "$input_dir")/${base_name}_compressed.tar.gz" \
+        --width=700 --height=500 2>/dev/null)
+    [[ -z "$output_file" ]] && return 0
+
+    local temp_tar
+    temp_tar="$(mktemp --suffix=.tar)"
+    tar -cf "$temp_tar" -C "$(dirname "$input_dir")" "$base_name"
+
+    bash "${SCRIPT_DIR}/compression/compress.sh" "$temp_tar" "$output_file"
+    rm -f "$temp_tar"
+}
+
 main() {
     while true; do
         local choice
@@ -89,7 +122,8 @@ main() {
 
         case "$choice" in
             "Compress File") handle_compress ;;
-            "Decompress File") handle_decompress ;;
+            "Compress Folder") handle_compress_folder ;;
+            "Decompress File/Archive") handle_decompress ;;
             "Exit" | "")      exit 0           ;;
         esac
     done
