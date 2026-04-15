@@ -17,11 +17,13 @@ show_menu() {
         --title="Hybrid Compression System" \
         --text="Select an operation" \
         --column="Operation" \
-        --width=500 --height=320 \
+        --width=500 --height=380 \
         --modal \
         "Compress File" \
         "Compress Folder" \
         "Decompress File/Archive" \
+        "Encrypt File" \
+        "Decrypt File" \
         "Exit" 2>/dev/null
 }
 handle_decompress() {
@@ -62,6 +64,42 @@ handle_decompress() {
         zenity --info --title="Extraction Complete" --text="Archive extracted to $(dirname "$output_file")" --width=400 2>/dev/null
         rm -f "$output_file"
     fi
+}
+
+handle_encrypt() {
+    local input_file output_file dir_name base_name name_only
+
+    input_file=$(zenity --file-selection --title="Select File to Encrypt" --width=700 --height=500 2>/dev/null)
+    [[ -z "$input_file" ]] && return 0
+
+    dir_name="$(dirname "$input_file")"
+    name_only="$(basename "${input_file%.*}")"
+
+    output_file=$(zenity --file-selection --save \
+        --title="Save Encrypted File As" \
+        --filename="${dir_name}/${name_only}.enc" \
+        --width=700 --height=500 2>/dev/null)
+    [[ -z "$output_file" ]] && return 0
+
+    bash "${SCRIPT_DIR}/encryption/encrypt.sh" "$input_file" "$output_file"
+}
+
+handle_decrypt() {
+    local input_file output_file dir_name base_name name_only
+
+    input_file=$(zenity --file-selection --title="Select File to Decrypt" --width=700 --height=500 2>/dev/null)
+    [[ -z "$input_file" ]] && return 0
+
+    dir_name="$(dirname "$input_file")"
+    name_only="$(basename "${input_file%.*}")"
+
+    output_file=$(zenity --file-selection --save \
+        --title="Save Decrypted File As" \
+        --filename="${dir_name}/${name_only}_decrypted" \
+        --width=700 --height=500 2>/dev/null)
+    [[ -z "$output_file" ]] && return 0
+
+    bash "${SCRIPT_DIR}/encryption/decrypt.sh" "$input_file" "$output_file"
 }
 
 handle_compress() {
@@ -121,10 +159,12 @@ main() {
         choice="$(show_menu)" || true
 
         case "$choice" in
-            "Compress File") handle_compress ;;
-            "Compress Folder") handle_compress_folder ;;
-            "Decompress File/Archive") handle_decompress ;;
-            "Exit" | "")      exit 0           ;;
+            "Compress File")         handle_compress         ;;
+            "Compress Folder")       handle_compress_folder  ;;
+            "Decompress File/Archive") handle_decompress     ;;
+            "Encrypt File")          handle_encrypt          ;;
+            "Decrypt File")          handle_decrypt          ;;
+            "Exit" | "")             exit 0                  ;;
         esac
     done
 }
