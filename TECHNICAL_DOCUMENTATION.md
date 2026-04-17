@@ -169,10 +169,10 @@ Count Files
 
 **File: [compression/compress.sh](compression/compress.sh)**
 - **Stages**:
-  1. RLE Encoding (5% progress)
+  1. RLE Encoding (10% progress)
   2. LZW Encoding (40% progress)
   3. GZIP Compression Level 9 (80% progress)
-- **Progress Display**: Uses `zenity --progress` with real-time updates
+- **Progress Display**: Uses `zenity --progress` with fixed sleep intervals between stages (not event-driven)
 - **Output Validation**: Ensures output file is created and non-empty
 - **Statistics Calculation**: Original size, compressed size, compression ratio
 
@@ -237,7 +237,7 @@ Ask to Delete Original?
 
 #### Implementation Details
 
-**File: [main.sh - handle_compress_folder()](main.sh#L341-L400)**
+**File: [main.sh - handle_compress_folder()](main.sh#L258)**
 - **Archive Format**: TAR + GZIP Level 9
 - **Output Extension**: Always `.tar.gz`
 - **Compression Method**: `tar -czf` (combined TAR and GZIP)
@@ -311,12 +311,12 @@ Check File Extension
   3. If yes: LZW Decode → RLE Decode → Output
   4. If no: Copy uncompressed data → Output
 
-**File: [decompression/decompress.sh](decompression/decompress.sh)**
-- **Format Detection**:
-  - `.tar.gz`: Use `tar -xzf` to extract folder
-  - `.gz`: Delegate to `smart_gzip_decompress.sh`
-  - `.pdf.gz`: Auto-set output extension to `.pdf`
-  - Other `.gz`: Auto-set output extension to `.txt`
+**File: [decompression/decompress.sh](decompression/decompress.sh) & [main.sh - handle_decompress()](main.sh#L29)**
+- **Format Detection** (split between files):
+  - `.tar.gz`: Handled in `main.sh` → Uses `tar -xzf` to extract folder directly
+  - `.gz`: Delegated to `smart_gzip_decompress.sh` for intelligent detection
+  - `.pdf.gz`: Handled in `main.sh` → Auto-set output extension to `.pdf`
+  - Other `.gz`: Handled in `main.sh` → Auto-set output extension to `.txt`
 
 ---
 
@@ -388,6 +388,7 @@ Show Success
   - At least one number (0-9)
 - **Output Format**: `.enc` file (encrypted binary)
 - **Command**: `openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -in <file> -out <encrypted> -pass pass:<password>`
+- **⚠️ Security Warning**: Using `-pass pass:<password>` exposes the password in process listings and shell history. For production use, consider using `-pass stdin` or reading from a file descriptor.
 
 ---
 
@@ -459,7 +460,7 @@ First stage of compression pipeline. Reduces repetitive character sequences to s
 
 ```
 Input:  AAAAAABBBCC
-Output: 6A3B2C
+Output: 6A3BCC
 
 Rules:
 - Count consecutive identical characters
@@ -477,6 +478,7 @@ BEGIN { ORS = "" }
 
 # For each line of input
 {
+    n = length($0)                    # Get line length
     for (i = 1; i <= n; i++) {
         c = substr($0, i, 1)          # Current character
         if (c == prev) {
@@ -495,6 +497,13 @@ BEGIN { ORS = "" }
         }
     }
     # Handle last sequence on line
+    if (prev != "") {
+        if (count >= 3)
+            printf "%d%s", count, prev
+        else
+            for (j = 0; j < count; j++)
+                printf "%s", prev
+    }
     printf "\n"                        # Newline marker
     prev = ""
     count = 0
@@ -505,8 +514,8 @@ BEGIN { ORS = "" }
 
 ```
 Input (100 bytes):  "AAAAAABBBCCDDDDDDDDDD"
-Output (13 bytes):  "6A3B2C10D"
-Ratio:             87% compression
+Output (12 bytes):  "6A3BCC10D"
+Ratio:             88% compression
 ```
 
 #### Decompression
@@ -681,7 +690,7 @@ BEGIN {
 #### Compression Characteristics
 
 - **Dictionary Size**: Grows from 256 (initial) to ~4096 entries for typical files
-- **Code Growth**: Starts with 8-bit codes, grows to 12-16 bits as needed
+- **Code Output Format**: Outputs decimal codes one per line (not bit-packed); dictionary can grow to thousands of entries
 - **Best Case**: Repetitive patterns → 60-80% compression
 - **Typical Case**: Text files → 40-60% compression
 - **Worst Case**: Already compressed data → 0% compression
@@ -1023,13 +1032,17 @@ Input File (encrypted, .enc)
 - **Purpose**: Derive strong encryption key from user password
 - **Iterations**: 100,000 (increases computational cost for attackers)
 - **Salt**: Generated automatically by OpenSSL
-- **Result**: Even weak passwords become strong keys
+- **Result**: Improves security by slowing down dictionary attacks
 
 **Why Secure**:
-1. Key space: 2^256 possible keys (unbreakable by brute force)
-2. Key derivation: 100,000 iterations slow down dictionary attacks
-3. Mode of operation: CBC mode prevents pattern recognition
-4. Random IV: Each encryption produces different ciphertext from same password
+1. Key space: 2^256 possible keys (computationally infeasible for brute-force attacks)
+2. Key derivation: PBKDF2 with 100,000 iterations increases attacker cost, making dictionary attacks impractical (but doesn't substitute for strong passwords)
+3. Mode of operation: CBC mode prevents pattern recognition across blocks
+4. Random IV: Each encryption with same password produces different ciphertext
+
+**Important Limitations**:
+- Security still depends fundamentally on password entropy; PBKDF2 slows attacks but cannot compensate for weak passwords
+- 6-character passwords with only 1 letter and 1 number may be guessable; recommend 12+ character passwords for critical data
 
 ---
 
@@ -1126,7 +1139,7 @@ Input File (encrypted, .enc)
 | zenity | 3.0+ | GUI dialogs | `sudo apt install zenity` |
 | gzip | 1.8+ | Final compression stage | `sudo apt install gzip` |
 | tar | 1.28+ | Archive creation | `sudo apt install tar` |
-| awk | GNU awk | Text processing (RLE/LZW) | `sudo apt install gawk` |
+| gawk | GNU awk | Text processing (RLE/LZW encoding/decoding) | `sudo apt install gawk` |
 | openssl | 1.1+ | Encryption/decryption | `sudo apt install openssl` |
 | ghostscript | 9.0+ | PDF compression | `sudo apt install ghostscript` |
 
@@ -1134,8 +1147,10 @@ Input File (encrypted, .enc)
 
 ```bash
 sudo apt update
-sudo apt install -y zenity gzip tar openssl ghostscript
+sudo apt install -y zenity gzip tar gawk openssl ghostscript
 ```
+
+**Note**: `gawk` (GNU Awk) is required by RLE and LZW encoding/decoding stages.
 
 ### Linux Distribution Support
 
@@ -1205,16 +1220,19 @@ Allows: Spaces, special characters, Unicode
 ### File Format Detection
 
 ```bash
-# Decompression Detection:
-- .tar.gz: TAR archive → Extract folder
-- .pdf.gz: PDF file → Auto-set output extension
-- .enc: Encrypted → Prompt for password
-- .gz: Other → Try smart detection
+# Main Entry Point (main.sh) - Decompression Detection:
+- .tar.gz: TAR archive → Extract folder (tar -xzf)
+- .gz: Other files → Send to decompress.sh for smart detection
 
-LZW Detection:
-- Read first 5 non-empty lines
-- Check if ALL are purely numeric (^[0-9]+$)
-- If yes: LZW pipeline; if no: plain GZIP
+# Smart GZIP Detection (smart_gzip_decompress.sh) - LZW Detection:
+- GZIP decompress first (gunzip -c)
+- Read first 5 lines (including empty lines)
+- Check if ALL lines are purely numeric (^[0-9]+$)
+- If yes: File is LZW encoded → Full pipeline: LZW Decode → RLE Decode
+- If no: File is plain GZIP → Output as-is
+
+# Encryption (handled separately by decrypt.sh):
+- .enc: Encrypted file → Prompt for password, then AES-256-CBC decrypt
 ```
 
 ### Error Recovery
